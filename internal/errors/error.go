@@ -50,6 +50,8 @@ const (
 	DeviceNotFound
 	// Tried to perform an operation on a path that doesn't exist on the device.
 	FileNoExistError
+	// Remote Start not implemented this is left for the user to do
+	RemoteStartFailed
 )
 
 func Errorf(code ErrCode, format string, args ...interface{}) error {

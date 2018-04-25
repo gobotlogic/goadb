@@ -24,9 +24,11 @@ type ServerConfig struct {
 
 	// Host and port the adb server is listening on.
 	// If not specified, will use the default port on localhost.
-	Host string
-	Port int
+	Host   string
+	Port   int
+	Remote bool
 
+	RemoteServer RemoteServer
 	// Dialer used to connect to the adb server.
 	Dialer
 
@@ -36,7 +38,12 @@ type ServerConfig struct {
 // Server knows how to start the adb server and connect to it.
 type server interface {
 	Start() error
+	RemoteStart(rs RemoteServer) error
 	Dial() (*wire.Conn, error)
+}
+
+type RemoteServer interface {
+	Start() error
 }
 
 func roundTripSingleResponse(s server, req string) ([]byte, error) {
@@ -94,14 +101,26 @@ func newServer(config ServerConfig) (server, error) {
 func (s *realServer) Dial() (*wire.Conn, error) {
 	conn, err := s.config.Dial(s.address)
 	if err != nil {
-		// Attempt to start the server and try again.
-		if err = s.Start(); err != nil {
-			return nil, errors.WrapErrorf(err, errors.ServerNotAvailable, "error starting server for dial")
-		}
+		if !s.config.Remote {
+			// Attempt to start the server and try again.
+			if err = s.Start(); err != nil {
+				return nil, errors.WrapErrorf(err, errors.ServerNotAvailable, "error starting server for dial")
+			}
 
-		conn, err = s.config.Dial(s.address)
-		if err != nil {
-			return nil, err
+			conn, err = s.config.Dial(s.address)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			// Attempt to start the server and try again.
+			if err = s.RemoteStart(s.config.RemoteServer); err != nil {
+				return nil, errors.WrapErrorf(err, errors.RemoteStartFailed, "error starting remote server")
+			}
+
+			conn, err = s.config.Dial(s.address)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	return conn, nil
@@ -112,6 +131,11 @@ func (s *realServer) Start() error {
 	output, err := s.config.fs.CmdCombinedOutput(s.config.PathToAdb, "-L", fmt.Sprintf("tcp:%s", s.address), "start-server")
 	outputStr := strings.TrimSpace(string(output))
 	return errors.WrapErrorf(err, errors.ServerNotAvailable, "error starting server: %s\noutput:\n%s", err, outputStr)
+}
+
+// RemoteStart
+func (s *realServer) RemoteStart(rs RemoteServer) error {
+	return s.config.RemoteServer.Start()
 }
 
 // filesystem abstracts interactions with the local filesystem for testability.
